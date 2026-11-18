@@ -8,18 +8,44 @@ A modern, **100% clean-room Jetpack Compose** and **Material 3** chat UI library
 
 ---
 
+## Live Screenshots (Light, Dark, Rich Media & Profile)
+
+All screenshots below are generated automatically from live Compose UI instrumentation tests ([`ChatKitShowcaseInstrumentationTest.kt`](./sample/src/androidTest/java/de/hartz/software/chatkitcompose/sample/ChatKitShowcaseInstrumentationTest.kt)) running on an Android device:
+
+| Dialogs (Light) | Dialogs (Dark) | Chat Thread (Light) | Chat Thread (Dark) |
+| :---: | :---: | :---: | :---: |
+| <img src="./docs/screenshots/01_dialogs_light.png" width="210" alt="Dialogs Light" /> | <img src="./docs/screenshots/02_dialogs_dark.png" width="210" alt="Dialogs Dark" /> | <img src="./docs/screenshots/03_chat_rich_light.png" width="210" alt="Chat Light" /> | <img src="./docs/screenshots/04_chat_rich_dark.png" width="210" alt="Chat Dark" /> |
+
+| Map, Poll, Voice & Video | Document, Contact & Security | Attachment Picker Tray | Voice Recording & Profile |
+| :---: | :---: | :---: | :---: |
+| <img src="./docs/screenshots/05_chat_poll_location_contact.png" width="210" alt="Poll Location Voice Video" /> | <img src="./docs/screenshots/09_chat_document_contact_security.png" width="210" alt="Document Contact Security" /> | <img src="./docs/screenshots/06_chat_attachments_tray.png" width="210" alt="Attachment Picker" /> | <img src="./docs/screenshots/07_chat_voice_recording.png" width="210" alt="Voice Recording" /> <img src="./docs/screenshots/08_profile_section.png" width="210" alt="Profile Section" /> |
+
+---
+
 ## Why ChatKit-Compose?
 
 - **Zero Data-Layer Rewrite:** Keep your existing `IUser`, `IMessage`, `IDialog`, and `MessageContentType` implementations.
-- **Effortless Adapter Migration:** Prefer incremental migration? Use `rememberMessagesListState` and `rememberDialogsListState` with familiar methods like `addToStart`, `addToEnd`, `update`, `deleteById`, `unselectAllItems`, and `updateDialogWithMessage`.
-- **Pure Jetpack Compose Idioms:** Prefer Unidirectional Data Flow (UDF)? Every component (`MessagesList`, `DialogsList`, `MessageInput`) also exposes a pure stateless overload with strict state hoisting and `Modifier` conventions.
-- **Material 3 Out of the Box:** Automatic light/dark theme and dynamic color support via `ChatKitDefaults` (`messagesListStyle`, `dialogsListStyle`, `messageInputStyle`).
-- **Modern UX Built-In:**
-  - Smooth `LazyColumn` item placement animations (`Modifier.animateItem()`).
-  - Automatic calendar date headers (`Today`, `Yesterday`, `d MMMM`) and consecutive same-author message grouping.
-  - Built-in support for quoted replies (`replyTo`), emoji reactions (`reactions`), delivery status icons (`MessageStatus`), image attachments, voice notes, and multi-selection mode.
-  - Pluggable `CustomContentConfig` DSL replacing RecyclerView `ViewHolder` boilerplate.
-  - Library-agnostic `ChatKitImageLoader` via `LocalChatKitImageLoader` (works out of the box with initials avatars or plugs into Coil / Glide).
+- **Effortless Adapter Migration:** Prefer incremental migration? Use `rememberMessagesListState` and `rememberDialogsListState` with familiar methods (`addToStart`, `addToEnd`, `update`, `deleteById`, `unselectAllItems`, `updateDialogWithMessage`, `scrollToMessageId`, `getMessageTimelineIndex`).
+- **Pure Jetpack Compose Idioms:** Every component (`MessagesList`, `DialogsList`, `MessageInput`, `ChatProfileSection`) exposes strict state hoisting and standard `Modifier` conventions.
+- **Material 3 Out of the Box:** Automatic Light/Dark theme and dynamic color support via `ChatKitDefaults`.
+- **Complete Built-in Rich Message Types:**
+  - **Images** (`MessageContentType.Image` / `ChatMessage` with `+N files` badge & missing-media handling)
+  - **GIFs** (`MessageContentType.Gif` / `GifMessage` with `AUTO` / `STATIC` animation badge)
+  - **Videos** (`MessageContentType.Video` / `VideoMessage` with play overlay, duration, file size, `+N files`)
+  - **Voice Messages** (`MessageContentType.Voice` / `VoiceMessage` with interactive waveform scrubber & `1x/1.5x/2x` playback speed)
+  - **Polls & Surveys** (`MessageContentType.Poll` / `PollMessage` with animated vote bars & percentage breakdown)
+  - **Locations & Maps** (`MessageContentType.Location` / `LocationMessage` with stylized map canvas, pin & coordinates)
+  - **Contacts** (`MessageContentType.Contact` / `ContactMessage` with avatar, organization/phone/email & key fingerprint)
+  - **Documents & Files** (`MessageContentType.Document` / `DocumentMessage` + `ChatFileTypeDetector`)
+  - **System & Security Events** (`MessageContentType.SystemEvent` / `SystemEventMessage`)
+  - **Custom Types:** Pluggable `CustomContentConfig.Builder` Kotlin DSL replacing XML `ViewHolder` boilerplate.
+- **Granular Animation & Feature Control:**
+  - Toggle individual animations or disable all animations globally via `ChatKitAnimationConfig.Disabled`.
+  - Enable/disable message types, replies, reactions, multi-selection, spoiler/privacy masking (`isMasked`), and message chunk counters (`maxMessageChunkSize`) via `ChatKitFeatureConfig`.
+- **Built-in Attachment Picker, Voice Recorder & Profile Screen:**
+  - `rememberChatAttachmentLaunchers` wraps Android Photo Picker & SAF multi-document selection.
+  - `VoiceRecorderState` drives an interactive live-waveform recording bar inside `MessageInput`.
+  - `ChatProfileSection` renders customizable user/group info, verification chips, quick actions, and member lists.
 
 ---
 
@@ -49,7 +75,7 @@ dependencies {
 
 ## Quick Start
 
-### 1. Plug In Your Own Data Models (or Use `ChatUser` / `ChatMessage` / `ChatDialog`)
+### 1. Plug In Your Own Data Models (or Use Built-in Immutable Models)
 
 ```kotlin
 val currentUser = ChatUser(id = "me", name = "Kai", isOnline = true)
@@ -68,7 +94,26 @@ val messagesState = rememberMessagesListState(
 )
 ```
 
-### 2. Render `MessagesList` + `MessageInput`
+### 2. Configure Animations & Features Globally (Optional)
+
+```kotlin
+ProvideChatKitAnimationConfig(
+    if (animationsEnabled) ChatKitAnimationConfig.Default else ChatKitAnimationConfig.Disabled
+) {
+    ProvideChatKitFeatureConfig(
+        ChatKitFeatureConfig(
+            enablePolls = true,
+            enableLocations = true,
+            enableVoiceMessages = true,
+            maxMessageChunkSize = 140,
+        )
+    ) {
+        ChatScreen()
+    }
+}
+```
+
+### 3. Render `MessagesList` + `MessageInput` (with Attachments & Voice Recording)
 
 ```kotlin
 Scaffold(
@@ -86,18 +131,27 @@ Scaffold(
                 )
                 true
             },
-            onAttachmentClick = { /* open media picker */ },
+            onAttachmentOptionSelected = { kind -> /* handle Image, Gif, Video, File, Poll, Location, Contact */ },
+            onVoiceMessageRecorded = { durationSeconds, waveform ->
+                messagesState.addToStart(
+                    VoiceMessage(
+                        id = UUID.randomUUID().toString(),
+                        audioUrl = "local://voice.opus",
+                        durationSeconds = durationSeconds,
+                        waveform = waveform,
+                        user = currentUser,
+                    ),
+                )
+            },
         )
     },
 ) { innerPadding ->
     MessagesList(
         state = messagesState,
-        onSelectionChanged = { selectedCount ->
-            // Toggle contextual TopAppBar actions when selectedCount > 0
-        },
-        onLoadMore = { page, totalItemsCount ->
-            // Fetch older history and call messagesState.addToEnd(olderMessages)
-        },
+        onSelectionChanged = { selectedCount -> /* toggle contextual TopAppBar */ },
+        onAvatarClick = { user -> openProfile(user) },
+        onPollVote = { pollMessage, optionId -> /* update poll state */ },
+        onLoadMore = { page, totalItemsCount -> /* append older history */ },
         modifier = Modifier
             .fillMaxSize()
             .padding(innerPadding),
@@ -105,7 +159,7 @@ Scaffold(
 }
 ```
 
-### 3. Render `DialogsList`
+### 4. Render `DialogsList` & `ChatProfileSection`
 
 ```kotlin
 DialogsList(
@@ -113,48 +167,47 @@ DialogsList(
     onDialogClick = { dialog -> openThread(dialog.id) },
     onDialogLongClick = { dialog -> showDialogOptions(dialog) },
 )
-```
 
-### 4. Plug In Coil / Glide (Optional)
-
-```kotlin
-val coilImageLoader = ChatKitImageLoader { url, contentDescription, modifier ->
-    AsyncImage(
-        model = url,
-        contentDescription = contentDescription,
-        contentScale = ContentScale.Crop,
-        modifier = modifier,
-    )
-}
-
-ProvideChatKitImageLoader(coilImageLoader) {
-    ChatScreen()
-}
+ChatProfileSection(
+    title = peer.name,
+    avatarUrl = peer.avatar,
+    subtitle = "Online • End-to-end encrypted",
+    isOnline = peer.isOnline,
+    verificationBadge = "Verified Identity",
+    quickActions = listOf(
+        ChatProfileQuickAction("msg", "Message", ChatKitIcons.Send) { openChat() },
+        ChatProfileQuickAction("keys", "Rotate Keys", ChatKitIcons.Key) { refreshKeys() },
+    ),
+    items = listOf(
+        ChatProfileItem.SectionHeader("Security"),
+        ChatProfileItem.StaticInfo("Fingerprint", "SHA256:9F82-A1C0", isMonospace = true),
+        ChatProfileItem.Action("Reset Session Keys", isDestructive = true) { resetKeys() },
+    ),
+)
 ```
 
 ---
 
-## Migrating from `stfalcon-studio/ChatKit`?
+## Documentation, Migration & Issue Audits
 
-We wrote a complete side-by-side migration guide comparing old XML + RecyclerView adapters with their Compose equivalents:
-
-👉 **[Read the Side-by-Side Migration Guide (`MIGRATION.md`)](./MIGRATION.md)**
+- 👉 **[Side-by-Side Migration Guide (`MIGRATION.md`)](./MIGRATION.md)** — XML + Adapter vs Compose equivalents.
+- 🔍 **[Curated `stfalcon-studio/ChatKit` GitHub Issues Audit (`docs/STFALCON_ISSUES_ANALYSIS.md`)](./docs/STFALCON_ISSUES_ANALYSIS.md)** — 18 high-value community issues resolved natively.
+- 🛠️ **[ParAnnoying Messenger Audit & Notes (`docs/PARANNOYING_MIGRATION_NOTES.md`)](./docs/PARANNOYING_MIGRATION_NOTES.md)** — Real-world workarounds removed in `ChatKit-Compose`.
 
 ---
 
 ## Development, Code Style & Agentic Harness
-
-This repository follows Google's official Android & Jetpack Compose guidelines and includes an **Agentic Coding Harness** for AI-assisted development:
 
 - [`AGENTS.md`](./AGENTS.md) — Architecture, Compose API guidelines, and Git workflow rules.
 - [`.agents/rules/`](./.agents/rules/) — Contextual coding and Git rules.
 - [`.agents/skills/`](./.agents/skills/) — Reusable `verify-build` and `migrate-chatkit` workflows.
 - [`.editorconfig`](./.editorconfig) & [`config/detekt/detekt.yml`](./config/detekt/detekt.yml) — Kotlin & Compose static analysis rules.
 
-Run tests and build the library + sample app locally:
+Run unit tests, instrumentation tests, and debug builds locally:
 
 ```powershell
 .\gradlew.bat testDebugUnitTest assembleDebug
+.\gradlew.bat :sample:connectedDebugAndroidTest
 ```
 
 ---
@@ -162,4 +215,3 @@ Run tests and build the library + sample app locally:
 ## License
 
 Licensed under the **Apache License, Version 2.0**. See [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE) for full details and attribution to `stfalcon-studio/ChatKit`.
-
