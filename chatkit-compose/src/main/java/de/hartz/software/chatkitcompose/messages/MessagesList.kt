@@ -1,8 +1,16 @@
 package de.hartz.software.chatkitcompose.messages
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,11 +20,9 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -33,14 +39,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.platform.LocalConfiguration
@@ -52,12 +61,15 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import de.hartz.software.chatkitcompose.models.CustomContentConfig
 import de.hartz.software.chatkitcompose.models.IMessage
+import de.hartz.software.chatkitcompose.models.IUser
 import de.hartz.software.chatkitcompose.models.MessageContentType
 import de.hartz.software.chatkitcompose.models.MessageStatus
 import de.hartz.software.chatkitcompose.theme.ChatAvatar
 import de.hartz.software.chatkitcompose.theme.ChatKitDefaults
+import de.hartz.software.chatkitcompose.theme.ChatKitFeatureConfig
 import de.hartz.software.chatkitcompose.theme.ChatKitIcons
-import de.hartz.software.chatkitcompose.theme.LocalChatKitImageLoader
+import de.hartz.software.chatkitcompose.theme.LocalChatKitAnimationConfig
+import de.hartz.software.chatkitcompose.theme.LocalChatKitFeatureConfig
 import de.hartz.software.chatkitcompose.theme.MessagesListStyle
 import de.hartz.software.chatkitcompose.utils.ChatDateFormatter
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -66,9 +78,10 @@ import kotlinx.coroutines.flow.filterNotNull
 /**
  * Stateless Jetpack Compose replacement for `com.stfalcon.chatkit.messages.MessagesList`.
  *
- * Displays incoming and outgoing message bubbles with automatic calendar date headers,
- * grouped consecutive message bubbles, optional images, replies, reactions, delivery
- * status indicators, selection highlights, and infinite-scroll pagination.
+ * Displays incoming and outgoing bubbles with automatic calendar date headers, consecutive bubble
+ * grouping, all built-in rich content types (Image, GIF, Video, Voice, Poll, Location, Contact,
+ * Document, SystemEvent), typing indicators, privacy spoiler masking, reactions, delivery states,
+ * multi-selection, and infinite-scroll pagination.
  */
 @Composable
 fun <M : IMessage> MessagesList(
@@ -77,6 +90,7 @@ fun <M : IMessage> MessagesList(
     modifier: Modifier = Modifier,
     lazyListState: LazyListState = rememberLazyListState(),
     selectedMessageIds: Set<String> = emptySet(),
+    typingUsers: List<IUser> = emptyList(),
     style: MessagesListStyle = ChatKitDefaults.messagesListStyle(),
     dateFormatter: ChatDateFormatter.Formatter = ChatDateFormatter.Formatter {
         ChatDateFormatter.formatChatDateHeader(it)
@@ -85,26 +99,38 @@ fun <M : IMessage> MessagesList(
         ChatDateFormatter.format(it, ChatDateFormatter.Template.TIME)
     },
     customContentConfig: CustomContentConfig<M> = CustomContentConfig.empty(),
+    authorNameFormatter: ((M) -> String)? = null,
     onMessageClick: ((M) -> Unit)? = null,
     onMessageLongClick: ((M) -> Unit)? = null,
+    onAvatarClick: ((IUser) -> Unit)? = null,
+    onPollVote: ((M, String) -> Unit)? = null,
+    onMediaClick: ((M) -> Unit)? = null,
+    onLocationClick: ((MessageContentType.Location) -> Unit)? = null,
+    onContactClick: ((MessageContentType.Contact) -> Unit)? = null,
+    onDocumentClick: ((MessageContentType.Document) -> Unit)? = null,
     onLoadMore: ((page: Int, totalItemsCount: Int) -> Unit)? = null,
     loadMoreThreshold: Int = 5,
     isLoadingMore: Boolean = false,
     contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
     emptyContent: @Composable () -> Unit = { DefaultEmptyMessagesContent() },
 ) {
-    val timelineItems = remember(
+    val animConfig = LocalChatKitAnimationConfig.current
+    val featureConfig = LocalChatKitFeatureConfig.current
+
+    val timelineItems by remember(
         messages,
         senderId,
         style.showIncomingAvatar,
         style.showIncomingAuthorName,
     ) {
-        buildTimelineItems(
-            messages = messages,
-            senderId = senderId,
-            showIncomingAvatar = style.showIncomingAvatar,
-            showIncomingAuthorName = style.showIncomingAuthorName,
-        )
+        derivedStateOf {
+            buildTimelineItems(
+                messages = messages,
+                senderId = senderId,
+                showIncomingAvatar = style.showIncomingAvatar,
+                showIncomingAuthorName = style.showIncomingAuthorName,
+            )
+        }
     }
 
     PaginationEffect(
@@ -116,7 +142,7 @@ fun <M : IMessage> MessagesList(
         onLoadMore = onLoadMore,
     )
 
-    if (timelineItems.isEmpty()) {
+    if (timelineItems.isEmpty() && typingUsers.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
@@ -128,6 +154,7 @@ fun <M : IMessage> MessagesList(
 
     val screenWidthDp = LocalConfiguration.current.screenWidthDp.dp
     val maxBubbleWidth = (screenWidthDp * style.maxBubbleWidthFraction).coerceAtLeast(180.dp)
+    val itemPlacementModifier: Modifier = Modifier
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -135,22 +162,46 @@ fun <M : IMessage> MessagesList(
         reverseLayout = true,
         contentPadding = contentPadding,
     ) {
+        if (typingUsers.isNotEmpty()) {
+            item(key = "typing_indicator", contentType = "typing_indicator") {
+                TypingIndicatorBubble(
+                    typingUsers = typingUsers,
+                    style = style,
+                    modifier = if (animConfig.shouldAnimateItemPlacement) itemPlacementModifier.animateItem() else itemPlacementModifier,
+                )
+            }
+        }
+
         items(
             items = timelineItems,
             key = { it.key },
             contentType = { item ->
                 when (item) {
                     is TimelineItem.DateHeader -> "date_header"
+                    is TimelineItem.SystemItem<*> -> "system_event"
                     is TimelineItem.MessageItem<*> -> if (item.isIncoming) "incoming_msg" else "outgoing_msg"
                 }
             },
         ) { item ->
+            val animModifier = if (animConfig.shouldAnimateItemPlacement) {
+                Modifier.animateItem()
+            } else {
+                Modifier
+            }
             when (item) {
                 is TimelineItem.DateHeader -> {
                     DateHeaderChip(
                         text = dateFormatter.format(item.date),
                         style = style,
-                        modifier = Modifier.animateItem(),
+                        modifier = animModifier,
+                    )
+                }
+
+                is TimelineItem.SystemItem<*> -> {
+                    SystemEventChip(
+                        event = item.event,
+                        style = style,
+                        modifier = animModifier,
                     )
                 }
 
@@ -166,11 +217,19 @@ fun <M : IMessage> MessagesList(
                         isSelected = typedMessage.id in selectedMessageIds,
                         maxBubbleWidth = maxBubbleWidth,
                         style = style,
+                        featureConfig = featureConfig,
                         formattedTime = timeFormatter.format(typedMessage.createdAt),
                         customContentConfig = customContentConfig,
+                        authorNameFormatter = authorNameFormatter,
                         onClick = onMessageClick?.let { callback -> { callback(typedMessage) } },
                         onLongClick = onMessageLongClick?.let { callback -> { callback(typedMessage) } },
-                        modifier = Modifier.animateItem(),
+                        onAvatarClick = onAvatarClick,
+                        onPollVote = onPollVote?.let { callback -> { optId -> callback(typedMessage, optId) } },
+                        onMediaClick = onMediaClick?.let { callback -> { callback(typedMessage) } },
+                        onLocationClick = onLocationClick,
+                        onContactClick = onContactClick,
+                        onDocumentClick = onDocumentClick,
+                        modifier = animModifier,
                     )
                 }
             }
@@ -202,6 +261,7 @@ fun <M : IMessage> MessagesList(
 fun <M : IMessage> MessagesList(
     state: MessagesListState<M>,
     modifier: Modifier = Modifier,
+    typingUsers: List<IUser> = emptyList(),
     style: MessagesListStyle = ChatKitDefaults.messagesListStyle(),
     dateFormatter: ChatDateFormatter.Formatter = ChatDateFormatter.Formatter {
         ChatDateFormatter.formatChatDateHeader(it)
@@ -210,28 +270,50 @@ fun <M : IMessage> MessagesList(
         ChatDateFormatter.format(it, ChatDateFormatter.Template.TIME)
     },
     customContentConfig: CustomContentConfig<M> = CustomContentConfig.empty(),
+    authorNameFormatter: ((M) -> String)? = null,
     onMessageClick: ((M) -> Unit)? = null,
     onMessageLongClick: ((M) -> Unit)? = null,
     onSelectionChanged: ((Int) -> Unit)? = null,
+    onAvatarClick: ((IUser) -> Unit)? = null,
+    onPollVote: ((M, String) -> Unit)? = null,
+    onMediaClick: ((M) -> Unit)? = null,
+    onLocationClick: ((MessageContentType.Location) -> Unit)? = null,
+    onContactClick: ((MessageContentType.Contact) -> Unit)? = null,
+    onDocumentClick: ((MessageContentType.Document) -> Unit)? = null,
     onLoadMore: ((page: Int, totalItemsCount: Int) -> Unit)? = null,
     loadMoreThreshold: Int = 5,
     isLoadingMore: Boolean = false,
     contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
     emptyContent: @Composable () -> Unit = { DefaultEmptyMessagesContent() },
 ) {
+    val animConfig = LocalChatKitAnimationConfig.current
+    val featureConfig = LocalChatKitFeatureConfig.current
+
     LaunchedEffect(state.scrollToLatestTrigger) {
         if (state.scrollToLatestTrigger > 0 && state.messages.isNotEmpty()) {
-            state.lazyListState.animateScrollToItem(0)
+            if (animConfig.shouldAnimateTransitions) {
+                state.lazyListState.animateScrollToItem(0)
+            } else {
+                state.lazyListState.scrollToItem(0)
+            }
         }
+    }
+
+    LaunchedEffect(state.pendingScrollTarget) {
+        val target = state.pendingScrollTarget ?: return@LaunchedEffect
+        state.scrollToMessageId(target.first, animate = animConfig.shouldAnimateTransitions)
+        state.clearPendingScrollTarget()
     }
 
     LaunchedEffect(state.selectedCount, onSelectionChanged) {
         onSelectionChanged?.invoke(state.selectedCount)
     }
 
+    val selectionEnabled = featureConfig.enableMultiSelection && (onSelectionChanged != null || onMessageLongClick != null)
+
     val effectiveClick: ((M) -> Unit)? = if (onSelectionChanged != null || onMessageClick != null) {
         { message ->
-            if (onSelectionChanged != null && state.isSelectionMode) {
+            if (featureConfig.enableMultiSelection && onSelectionChanged != null && state.isSelectionMode) {
                 state.toggleSelection(message.id)
             } else {
                 onMessageClick?.invoke(message)
@@ -241,9 +323,9 @@ fun <M : IMessage> MessagesList(
         null
     }
 
-    val effectiveLongClick: ((M) -> Unit)? = if (onSelectionChanged != null || onMessageLongClick != null) {
+    val effectiveLongClick: ((M) -> Unit)? = if (selectionEnabled) {
         { message ->
-            if (onSelectionChanged != null) {
+            if (featureConfig.enableMultiSelection && onSelectionChanged != null) {
                 state.toggleSelection(message.id)
             }
             onMessageLongClick?.invoke(message)
@@ -258,12 +340,20 @@ fun <M : IMessage> MessagesList(
         modifier = modifier,
         lazyListState = state.lazyListState,
         selectedMessageIds = state.selectedIds,
+        typingUsers = typingUsers,
         style = style,
         dateFormatter = dateFormatter,
         timeFormatter = timeFormatter,
         customContentConfig = customContentConfig,
+        authorNameFormatter = authorNameFormatter,
         onMessageClick = effectiveClick,
         onMessageLongClick = effectiveLongClick,
+        onAvatarClick = onAvatarClick,
+        onPollVote = onPollVote,
+        onMediaClick = onMediaClick,
+        onLocationClick = onLocationClick,
+        onContactClick = onContactClick,
+        onDocumentClick = onDocumentClick,
         onLoadMore = onLoadMore,
         loadMoreThreshold = loadMoreThreshold,
         isLoadingMore = isLoadingMore,
@@ -339,12 +429,21 @@ private fun <M : IMessage> MessageBubbleRow(
     isSelected: Boolean,
     maxBubbleWidth: Dp,
     style: MessagesListStyle,
+    featureConfig: ChatKitFeatureConfig,
     formattedTime: String,
     customContentConfig: CustomContentConfig<M>,
+    authorNameFormatter: ((M) -> String)?,
     onClick: (() -> Unit)?,
     onLongClick: (() -> Unit)?,
+    onAvatarClick: ((IUser) -> Unit)?,
+    onPollVote: ((String) -> Unit)?,
+    onMediaClick: (() -> Unit)?,
+    onLocationClick: ((MessageContentType.Location) -> Unit)?,
+    onContactClick: ((MessageContentType.Contact) -> Unit)?,
+    onDocumentClick: ((MessageContentType.Document) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    val animConfig = LocalChatKitAnimationConfig.current
     val topPadding = when (groupPosition) {
         MessageGroupPosition.SINGLE, MessageGroupPosition.FIRST -> 6.dp
         MessageGroupPosition.MIDDLE, MessageGroupPosition.LAST -> 2.dp
@@ -378,6 +477,13 @@ private fun <M : IMessage> MessageBubbleRow(
                     imageUrl = message.user.avatar,
                     size = style.avatarSize,
                     isOnline = message.user.isOnline,
+                    modifier = if (onAvatarClick != null) {
+                        Modifier
+                            .clip(RoundedCornerShape(style.avatarSize))
+                            .clickable { onAvatarClick(message.user) }
+                    } else {
+                        Modifier
+                    },
                 )
             } else {
                 Spacer(modifier = Modifier.width(style.avatarSize))
@@ -389,9 +495,21 @@ private fun <M : IMessage> MessageBubbleRow(
             horizontalAlignment = if (isIncoming) Alignment.Start else Alignment.End,
             modifier = Modifier.widthIn(max = maxBubbleWidth),
         ) {
-            AnimatedVisibility(visible = showAuthorName) {
+            val displayAuthorName = authorNameFormatter?.invoke(message) ?: message.user.name
+            if (animConfig.shouldAnimateTransitions) {
+                AnimatedVisibility(visible = showAuthorName) {
+                    Text(
+                        text = displayAuthorName,
+                        style = style.authorNameTextStyle,
+                        color = style.incomingAuthorNameColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(start = 12.dp, bottom = 2.dp),
+                    )
+                }
+            } else if (showAuthorName) {
                 Text(
-                    text = message.user.name,
+                    text = displayAuthorName,
                     style = style.authorNameTextStyle,
                     color = style.incomingAuthorNameColor,
                     maxLines = 1,
@@ -405,11 +523,17 @@ private fun <M : IMessage> MessageBubbleRow(
                 isIncoming = isIncoming,
                 groupPosition = groupPosition,
                 style = style,
+                featureConfig = featureConfig,
                 formattedTime = formattedTime,
                 customContentConfig = customContentConfig,
+                onPollVote = onPollVote,
+                onMediaClick = onMediaClick,
+                onLocationClick = onLocationClick,
+                onContactClick = onContactClick,
+                onDocumentClick = onDocumentClick,
             )
 
-            if (message.reactions.isNotEmpty()) {
+            if (featureConfig.enableReactions && message.reactions.isNotEmpty()) {
                 ReactionsBar(
                     reactions = message.reactions,
                     modifier = Modifier.padding(top = 4.dp),
@@ -425,60 +549,64 @@ private fun <M : IMessage> MessageBubble(
     isIncoming: Boolean,
     groupPosition: MessageGroupPosition,
     style: MessagesListStyle,
+    featureConfig: ChatKitFeatureConfig,
     formattedTime: String,
     customContentConfig: CustomContentConfig<M>,
+    onPollVote: ((String) -> Unit)?,
+    onMediaClick: (() -> Unit)?,
+    onLocationClick: ((MessageContentType.Location) -> Unit)?,
+    onContactClick: ((MessageContentType.Contact) -> Unit)?,
+    onDocumentClick: ((MessageContentType.Document) -> Unit)?,
 ) {
+    val animConfig = LocalChatKitAnimationConfig.current
     val containerColor = if (isIncoming) style.incomingBubbleColor else style.outgoingBubbleColor
     val textColor = if (isIncoming) style.incomingTextColor else style.outgoingTextColor
     val timeColor = if (isIncoming) style.incomingTimeColor else style.outgoingTimeColor
     val bubbleShape = bubbleShapeFor(isIncoming, groupPosition, style)
+    val accentColor = if (isIncoming) MaterialTheme.colorScheme.primary else textColor
+
+    val shouldMask = message.isMasked || featureConfig.maskMessagesByDefault
+    var isRevealed by remember(message.id, shouldMask) { mutableStateOf(!shouldMask) }
 
     Surface(
         color = containerColor,
         contentColor = textColor,
         shape = bubbleShape,
         tonalElevation = 1.dp,
+        modifier = if (animConfig.shouldAnimateContentSize) Modifier.animateContentSize() else Modifier,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
         ) {
-            message.replyTo?.let { replied ->
-                ReplyPreviewBlock(
-                    replyTo = replied,
-                    style = style,
-                    modifier = Modifier.padding(bottom = 6.dp),
-                )
+            if (featureConfig.enableReplies) {
+                message.replyTo?.let { replied ->
+                    ReplyPreviewBlock(
+                        replyTo = replied,
+                        style = style,
+                        modifier = Modifier.padding(bottom = 6.dp),
+                    )
+                }
             }
 
-            val handledByCustom = customContentConfig.RenderIfMatched(message, isIncoming)
-            if (!handledByCustom) {
-                if (message is MessageContentType.Image && !message.imageUrl.isNullOrBlank()) {
-                    LocalChatKitImageLoader.current.LoadImage(
-                        url = message.imageUrl,
-                        contentDescription = message.text.ifBlank { "Image message" },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 120.dp, max = 220.dp)
-                            .aspectRatio(4f / 3f)
-                            .clip(RoundedCornerShape(12.dp)),
-                    )
-                    if (message.text.isNotBlank()) {
-                        Spacer(modifier = Modifier.height(6.dp))
-                    }
-                }
-
-                if (message is MessageContentType.Voice) {
-                    VoiceAttachmentRow(
-                        durationSeconds = message.durationSeconds,
+            if (shouldMask && !isRevealed) {
+                MaskedMessageShield(
+                    textColor = textColor,
+                    onReveal = { isRevealed = true },
+                )
+            } else {
+                val handledByCustom = customContentConfig.RenderIfMatched(message, isIncoming)
+                if (!handledByCustom) {
+                    RenderBuiltInMessageContent(
+                        message = message,
+                        featureConfig = featureConfig,
+                        style = style,
                         textColor = textColor,
-                    )
-                }
-
-                if (message.text.isNotBlank()) {
-                    Text(
-                        text = message.text,
-                        style = style.messageTextStyle,
-                        color = textColor,
+                        accentColor = accentColor,
+                        onPollVote = onPollVote,
+                        onMediaClick = onMediaClick,
+                        onLocationClick = onLocationClick,
+                        onContactClick = onContactClick,
+                        onDocumentClick = onDocumentClick,
                     )
                 }
             }
@@ -490,12 +618,19 @@ private fun <M : IMessage> MessageBubble(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
+                if (!message.statusLabel.isNullOrBlank()) {
+                    Text(
+                        text = message.statusLabel!!,
+                        style = style.timeTextStyle.copy(fontWeight = FontWeight.Bold),
+                        color = style.statusReadTint,
+                    )
+                }
                 Text(
                     text = formattedTime,
                     style = style.timeTextStyle,
                     color = timeColor,
                 )
-                if (!isIncoming) {
+                if (!isIncoming || message.status == MessageStatus.UNCONFIRMED || message.status == MessageStatus.WARNING) {
                     MessageStatusIcon(
                         status = message.status,
                         defaultTint = timeColor,
@@ -505,6 +640,121 @@ private fun <M : IMessage> MessageBubble(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun <M : IMessage> RenderBuiltInMessageContent(
+    message: M,
+    featureConfig: ChatKitFeatureConfig,
+    style: MessagesListStyle,
+    textColor: Color,
+    accentColor: Color,
+    onPollVote: ((String) -> Unit)?,
+    onMediaClick: (() -> Unit)?,
+    onLocationClick: ((MessageContentType.Location) -> Unit)?,
+    onContactClick: ((MessageContentType.Contact) -> Unit)?,
+    onDocumentClick: ((MessageContentType.Document) -> Unit)?,
+) {
+    var renderedRichBlock = false
+
+    if (message is MessageContentType.Gif && featureConfig.enableGifs) {
+        GifAttachmentContent(gif = message, onClick = onMediaClick)
+        renderedRichBlock = true
+    } else if (message is MessageContentType.Video && featureConfig.enableVideos) {
+        VideoAttachmentContent(video = message, onClick = onMediaClick)
+        renderedRichBlock = true
+    } else if (message is MessageContentType.Image && !message.imageUrl.isNullOrBlank() && featureConfig.enableImages) {
+        ImageAttachmentContent(
+            image = message,
+            description = message.text.ifBlank { "Image attachment" },
+            onClick = onMediaClick,
+        )
+        renderedRichBlock = true
+    } else if (message is MessageContentType.Voice && featureConfig.enableVoiceMessages) {
+        VoiceMessageContent(
+            voice = message,
+            textColor = textColor,
+            accentColor = accentColor,
+        )
+        renderedRichBlock = true
+    } else if (message is MessageContentType.Poll && featureConfig.enablePolls) {
+        PollMessageContent(
+            poll = message,
+            textColor = textColor,
+            accentColor = accentColor,
+            onVoteOption = onPollVote,
+        )
+        return
+    } else if (message is MessageContentType.Location && featureConfig.enableLocations) {
+        LocationMessageContent(
+            location = message,
+            textColor = textColor,
+            accentColor = accentColor,
+            onClick = onLocationClick?.let { callback -> { callback(message) } },
+        )
+        return
+    } else if (message is MessageContentType.Contact && featureConfig.enableContacts) {
+        ContactMessageContent(
+            contact = message,
+            textColor = textColor,
+            accentColor = accentColor,
+            onClick = onContactClick?.let { callback -> { callback(message) } },
+        )
+        return
+    } else if (message is MessageContentType.Document && featureConfig.enableFiles) {
+        DocumentMessageContent(
+            document = message,
+            textColor = textColor,
+            accentColor = accentColor,
+            onClick = onDocumentClick?.let { callback -> { callback(message) } },
+        )
+        renderedRichBlock = true
+    }
+
+    if (message.text.isNotBlank()) {
+        if (renderedRichBlock) {
+            Spacer(modifier = Modifier.height(6.dp))
+        }
+        Text(
+            text = message.text,
+            style = style.messageTextStyle,
+            color = textColor,
+        )
+    } else if (!renderedRichBlock) {
+        Text(
+            text = "Attachment hidden by configuration",
+            style = MaterialTheme.typography.bodySmall,
+            color = textColor.copy(alpha = 0.65f),
+        )
+    }
+}
+
+@Composable
+private fun MaskedMessageShield(
+    textColor: Color,
+    onReveal: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(textColor.copy(alpha = 0.10f))
+            .clickable(onClick = onReveal)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = ChatKitIcons.VisibilityOff,
+            contentDescription = "Hidden message",
+            tint = textColor.copy(alpha = 0.8f),
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            text = "Hidden message • Tap to reveal",
+            style = MaterialTheme.typography.bodyMedium,
+            color = textColor.copy(alpha = 0.85f),
+        )
     }
 }
 
@@ -550,44 +800,47 @@ private fun ReplyPreviewBlock(
 }
 
 @Composable
-private fun VoiceAttachmentRow(
-    durationSeconds: Int,
-    textColor: Color,
-) {
-    val minutes = durationSeconds / 60
-    val seconds = durationSeconds % 60
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.padding(vertical = 2.dp),
-    ) {
-        Text(
-            text = "Voice note • %d:%02d".format(minutes, seconds),
-            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-            color = textColor,
-        )
-    }
-}
-
-@Composable
 private fun MessageStatusIcon(
     status: MessageStatus,
     defaultTint: Color,
     readTint: Color,
     errorTint: Color,
 ) {
+    val rotateSending = status == MessageStatus.SENDING &&
+        LocalChatKitAnimationConfig.current.shouldAnimateStatusRotation
+
+    val rotationAngle = if (rotateSending) {
+        val transition = rememberInfiniteTransition(label = "sendingRotate")
+        val angle by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1200, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "sendingAngle",
+        )
+        angle
+    } else {
+        0f
+    }
+
     val (icon, tint, description) = when (status) {
         MessageStatus.SENDING -> Triple(ChatKitIcons.Schedule, defaultTint, "Sending")
         MessageStatus.SENT -> Triple(ChatKitIcons.Check, defaultTint, "Sent")
         MessageStatus.DELIVERED -> Triple(ChatKitIcons.DoneAll, defaultTint, "Delivered")
         MessageStatus.READ -> Triple(ChatKitIcons.DoneAll, readTint, "Read")
+        MessageStatus.UNCONFIRMED -> Triple(ChatKitIcons.HelpOutline, defaultTint, "Awaiting confirmation")
+        MessageStatus.WARNING -> Triple(ChatKitIcons.Warning, errorTint, "Security warning")
         MessageStatus.FAILED -> Triple(ChatKitIcons.ErrorOutline, errorTint, "Failed to send")
     }
     Icon(
         imageVector = icon,
         contentDescription = description,
         tint = tint,
-        modifier = Modifier.size(14.dp),
+        modifier = Modifier
+            .size(14.dp)
+            .rotate(rotationAngle),
     )
 }
 
@@ -690,4 +943,3 @@ private fun DefaultEmptyMessagesContent() {
         )
     }
 }
-

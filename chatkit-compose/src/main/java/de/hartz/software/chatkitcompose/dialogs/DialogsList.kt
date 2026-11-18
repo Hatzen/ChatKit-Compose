@@ -36,13 +36,14 @@ import de.hartz.software.chatkitcompose.models.MessageContentType
 import de.hartz.software.chatkitcompose.theme.ChatAvatar
 import de.hartz.software.chatkitcompose.theme.ChatKitDefaults
 import de.hartz.software.chatkitcompose.theme.DialogsListStyle
+import de.hartz.software.chatkitcompose.theme.LocalChatKitAnimationConfig
 import de.hartz.software.chatkitcompose.utils.ChatDateFormatter
 
 /**
  * Stateless Jetpack Compose replacement for `com.stfalcon.chatkit.dialogs.DialogsList`.
  *
  * Displays conversation previews with avatars, online presence indicators, formatted timestamps,
- * last-message previews, unread count badges, and animated list reordering.
+ * last-message previews, unread count badges, and configurable animated list reordering.
  */
 @Composable
 fun <M : IMessage, D : IDialog<M>> DialogsList(
@@ -59,6 +60,8 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
     emptyContent: @Composable () -> Unit = { DefaultEmptyDialogsContent() },
     itemContent: (@Composable (dialog: D) -> Unit)? = null,
 ) {
+    val animConfig = LocalChatKitAnimationConfig.current
+
     if (dialogs.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -79,7 +82,13 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
             key = { it.id },
             contentType = { "dialog_item" },
         ) { dialog ->
-            Column(modifier = Modifier.animateItem()) {
+            Column(
+                modifier = if (animConfig.shouldAnimateItemPlacement) {
+                    Modifier.animateItem()
+                } else {
+                    Modifier
+                },
+            ) {
                 if (itemContent != null) {
                     itemContent(dialog)
                 } else {
@@ -239,8 +248,14 @@ private fun <M : IMessage> formatLastMessagePreview(
     val lastMessage = dialog.lastMessage ?: return "No messages yet"
     val body = when {
         lastMessage.text.isNotBlank() -> lastMessage.text
+        lastMessage is MessageContentType.Gif -> "GIF"
+        lastMessage is MessageContentType.Video -> "Video"
         lastMessage is MessageContentType.Image && !lastMessage.imageUrl.isNullOrBlank() -> "Photo"
         lastMessage is MessageContentType.Voice -> "Voice message"
+        lastMessage is MessageContentType.Poll -> "Poll: ${lastMessage.question}"
+        lastMessage is MessageContentType.Location -> "Location: ${lastMessage.placeName}"
+        lastMessage is MessageContentType.Contact -> "Contact: ${lastMessage.contactName}"
+        lastMessage is MessageContentType.Document -> "File: ${lastMessage.fileName}"
         else -> "Attachment"
     }
     return if (isGroup) "${lastMessage.user.name}: $body" else body
@@ -290,4 +305,3 @@ private fun DefaultEmptyDialogsContent() {
         )
     }
 }
-

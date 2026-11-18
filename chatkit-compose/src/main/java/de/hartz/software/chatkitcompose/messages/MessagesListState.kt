@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import de.hartz.software.chatkitcompose.models.IMessage
+import de.hartz.software.chatkitcompose.models.MessageContentType
 import de.hartz.software.chatkitcompose.utils.ChatDateFormatter
 import java.util.Date
 
@@ -39,6 +40,13 @@ sealed interface TimelineItem {
         override val key: String = "date_header_$id"
     }
 
+    data class SystemItem<out M : IMessage>(
+        val message: M,
+        val event: MessageContentType.SystemEvent,
+    ) : TimelineItem {
+        override val key: String = "system_${message.id}"
+    }
+
     data class MessageItem<out M : IMessage>(
         val message: M,
         val isIncoming: Boolean,
@@ -52,8 +60,8 @@ sealed interface TimelineItem {
 
 /**
  * Transforms [messages] into timeline items ordered newest-first for `LazyColumn(reverseLayout = true)`,
- * automatically inserting [TimelineItem.DateHeader] entries at day boundaries and grouping
- * consecutive messages from the same author within [groupingWindowMillis].
+ * automatically inserting [TimelineItem.DateHeader] entries at day boundaries, centering
+ * [MessageContentType.SystemEvent] notices, and grouping consecutive bubbles from the same author.
  */
 fun <M : IMessage> buildTimelineItems(
     messages: List<M>,
@@ -72,41 +80,49 @@ fun <M : IMessage> buildTimelineItems(
         val newerBelow = newestFirst.getOrNull(index - 1)
         val olderAbove = newestFirst.getOrNull(index + 1)
 
-        val sameAsAbove = olderAbove != null && canGroupMessages(
-            first = olderAbove,
-            second = current,
-            groupingWindowMillis = groupingWindowMillis,
-        )
-        val sameAsBelow = newerBelow != null && canGroupMessages(
-            first = current,
-            second = newerBelow,
-            groupingWindowMillis = groupingWindowMillis,
-        )
+        if (current is MessageContentType.SystemEvent) {
+            result.add(TimelineItem.SystemItem(message = current, event = current))
+        } else {
+            val sameAsAbove = olderAbove != null &&
+                olderAbove !is MessageContentType.SystemEvent &&
+                canGroupMessages(
+                    first = olderAbove,
+                    second = current,
+                    groupingWindowMillis = groupingWindowMillis,
+                )
+            val sameAsBelow = newerBelow != null &&
+                newerBelow !is MessageContentType.SystemEvent &&
+                canGroupMessages(
+                    first = current,
+                    second = newerBelow,
+                    groupingWindowMillis = groupingWindowMillis,
+                )
 
-        val groupPosition = when {
-            !sameAsAbove && !sameAsBelow -> MessageGroupPosition.SINGLE
-            !sameAsAbove && sameAsBelow -> MessageGroupPosition.FIRST
-            sameAsAbove && sameAsBelow -> MessageGroupPosition.MIDDLE
-            else -> MessageGroupPosition.LAST
+            val groupPosition = when {
+                !sameAsAbove && !sameAsBelow -> MessageGroupPosition.SINGLE
+                !sameAsAbove && sameAsBelow -> MessageGroupPosition.FIRST
+                sameAsAbove && sameAsBelow -> MessageGroupPosition.MIDDLE
+                else -> MessageGroupPosition.LAST
+            }
+
+            val isIncoming = current.user.id != senderId
+            val showAvatar = isIncoming &&
+                showIncomingAvatar &&
+                (groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.LAST)
+            val showAuthorName = isIncoming &&
+                showIncomingAuthorName &&
+                (groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.FIRST)
+
+            result.add(
+                TimelineItem.MessageItem(
+                    message = current,
+                    isIncoming = isIncoming,
+                    groupPosition = groupPosition,
+                    showAvatar = showAvatar,
+                    showAuthorName = showAuthorName,
+                ),
+            )
         }
-
-        val isIncoming = current.user.id != senderId
-        val showAvatar = isIncoming &&
-            showIncomingAvatar &&
-            (groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.LAST)
-        val showAuthorName = isIncoming &&
-            showIncomingAuthorName &&
-            (groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.FIRST)
-
-        result.add(
-            TimelineItem.MessageItem(
-                message = current,
-                isIncoming = isIncoming,
-                groupPosition = groupPosition,
-                showAvatar = showAvatar,
-                showAuthorName = showAuthorName,
-            ),
-        )
 
         val isDayBoundary = olderAbove == null || !ChatDateFormatter.isSameDay(current.createdAt, olderAbove.createdAt)
         if (isDayBoundary) {
@@ -155,6 +171,9 @@ class MessagesListState<M : IMessage>(
         private set
 
     internal var scrollToLatestTrigger by mutableIntStateOf(0)
+        private set
+
+    internal var pendingScrollTarget: Pair<String, Int>? by mutableStateOf(null)
         private set
 
     /** Number of currently selected messages. */
@@ -221,6 +240,53 @@ class MessagesListState<M : IMessage>(
         if (index < 0) return false
         _messages[index] = transform(_messages[index])
         return true
+    }
+
+    /**
+     * Computes the exact `LazyColumn` timeline index for [messageId] (accounting for injected
+     * date headers), or `-1` if absent. Replaces manual `Date` wrapper filtering in legacy adapters.
+     */
+    fun getMessageTimelineIndex(
+        messageId: String,
+        showIncomingAvatar: Boolean = true,
+        showIncomingAuthorName: Boolean = false,
+    ): Int {
+        val timeline = buildTimelineItems(
+            messages = _messages,
+            senderId = senderId,
+            showIncomingAvatar = showIncomingAvatar,
+            showIncomingAuthorName = showIncomingAuthorName,
+        )
+        return timeline.indexOfFirst { item ->
+            (item is TimelineItem.MessageItem<*> && item.message.id == messageId) ||
+                (item is TimelineItem.SystemItem<*> && item.message.id == messageId)
+        }
+    }
+
+    /**
+     * Smoothly scrolls directly to the message with [messageId], returning `true` if found.
+     */
+    suspend fun scrollToMessageId(messageId: String, animate: Boolean = true): Boolean {
+        val index = getMessageTimelineIndex(messageId)
+        if (index < 0) return false
+        if (animate) {
+            lazyListState.animateScrollToItem(index)
+        } else {
+            lazyListState.scrollToItem(index)
+        }
+        return true
+    }
+
+    /**
+     * Queues a scroll to [messageId] handled automatically inside [MessagesList].
+     */
+    fun requestScrollToMessage(messageId: String) {
+        val nextCounter = (pendingScrollTarget?.second ?: 0) + 1
+        pendingScrollTarget = messageId to nextCounter
+    }
+
+    internal fun clearPendingScrollTarget() {
+        pendingScrollTarget = null
     }
 
     /**
@@ -309,4 +375,3 @@ fun <M : IMessage> rememberMessagesListState(
         lazyListState = lazyListState,
     )
 }
-
