@@ -1,0 +1,16 @@
+ChatKit-Compose
+Copyright 2026 ChatKit-Compose Contributors
+
+This project is an independent, 100% clean-room Jetpack Compose rewrite
+inspired by the API ergonomics, model-agnostic interfaces (IUser, IMessage,
+IDialog, MessageContentType), and chat UI concepts pioneered by:
+
+  stfalcon-studio/ChatKit
+  https://github.com/stfalcon-studio/ChatKit
+  Original Copyright 2016 stfalcon.com (Apache License 2.0)
+
+Thank you to the Stfalcon team and all contributors of the original ChatKit
+library for helping generations of Android developers build chat UIs cleanly.
+ChatKit-Compose exists to give teams an effortless path forward into modern
+Jetpack Compose and Material 3 without rewriting their domain models.
+
