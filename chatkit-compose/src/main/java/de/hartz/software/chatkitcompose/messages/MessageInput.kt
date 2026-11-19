@@ -75,6 +75,7 @@ fun MessageInput(
     hint: String = "Message",
     style: MessageInputStyle = ChatKitDefaults.messageInputStyle(),
     showAttachmentButton: Boolean = true,
+    onAttachmentButtonClick: (() -> Unit)? = null,
     onAttachmentClick: (() -> Unit)? = null,
     onAttachmentOptionSelected: ((AttachmentKind) -> Unit)? = null,
     onVoiceMessageRecorded: ((durationSeconds: Int, waveform: List<Float>) -> Unit)? = null,
@@ -113,9 +114,10 @@ fun MessageInput(
         featureConfig.enableVoiceMessages &&
         onVoiceMessageRecorded != null
 
-    val hasAttachmentTrigger = showAttachmentButton &&
-        featureConfig.hasAnyAttachmentEnabled &&
-        (onAttachmentOptionSelected != null || onAttachmentClick != null)
+    val hasAttachmentTrigger = showAttachmentButton && (
+        onAttachmentButtonClick != null ||
+            (featureConfig.hasAnyAttachmentEnabled && (onAttachmentOptionSelected != null || onAttachmentClick != null))
+        )
 
     val chunkCount = featureConfig.maxMessageChunkSize?.let { limit ->
         if (limit > 0 && value.length > limit) {
@@ -214,10 +216,12 @@ fun MessageInput(
                     if (hasAttachmentTrigger) {
                         IconButton(
                             onClick = {
-                                if (onAttachmentOptionSelected != null) {
-                                    attachmentTrayExpanded = !attachmentTrayExpanded
-                                } else {
-                                    onAttachmentClick?.invoke()
+                                when {
+                                    onAttachmentButtonClick != null -> onAttachmentButtonClick()
+                                    onAttachmentOptionSelected != null -> {
+                                        attachmentTrayExpanded = !attachmentTrayExpanded
+                                    }
+                                    else -> onAttachmentClick?.invoke()
                                 }
                             },
                             enabled = enabled,
@@ -325,6 +329,7 @@ fun MessageInput(
     hint: String = "Message",
     style: MessageInputStyle = ChatKitDefaults.messageInputStyle(),
     showAttachmentButton: Boolean = true,
+    onAttachmentButtonClick: (() -> Unit)? = null,
     onAttachmentClick: (() -> Unit)? = null,
     onAttachmentOptionSelected: ((AttachmentKind) -> Unit)? = null,
     onVoiceMessageRecorded: ((durationSeconds: Int, waveform: List<Float>) -> Unit)? = null,
@@ -350,6 +355,7 @@ fun MessageInput(
         hint = hint,
         style = style,
         showAttachmentButton = showAttachmentButton,
+        onAttachmentButtonClick = onAttachmentButtonClick,
         onAttachmentClick = onAttachmentClick,
         onAttachmentOptionSelected = onAttachmentOptionSelected,
         onVoiceMessageRecorded = onVoiceMessageRecorded,

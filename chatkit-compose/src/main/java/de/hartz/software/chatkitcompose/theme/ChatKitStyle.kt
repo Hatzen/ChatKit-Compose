@@ -30,6 +30,7 @@ data class MessagesListStyle(
     val replyAccentColor: Color,
     val statusReadTint: Color,
     val statusErrorTint: Color,
+    val statusWarningTint: Color = Color(0xFFE65100),
     val avatarSize: Dp,
     val showIncomingAvatar: Boolean,
     val showIncomingAuthorName: Boolean,

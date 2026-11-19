@@ -17,7 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -40,6 +41,19 @@ import de.hartz.software.chatkitcompose.theme.LocalChatKitAnimationConfig
 import de.hartz.software.chatkitcompose.utils.ChatDateFormatter
 
 /**
+ * Disambiguates duplicate `IDialog.id` values (for example across distinct domain subclasses
+ * sharing a numeric persistence ID) so `LazyColumn` item keys remain strictly unique.
+ */
+internal fun buildUniqueDialogKeys(dialogs: List<IDialog<*>>): List<String> {
+    val seen = HashMap<String, Int>(dialogs.size)
+    return dialogs.map { dialog ->
+        val count = seen[dialog.id] ?: 0
+        seen[dialog.id] = count + 1
+        if (count == 0) dialog.id else "${dialog.id}#$count"
+    }
+}
+
+/**
  * Stateless Jetpack Compose replacement for `com.stfalcon.chatkit.dialogs.DialogsList`.
  *
  * Displays conversation previews with avatars, online presence indicators, formatted timestamps,
@@ -52,17 +66,21 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
     modifier: Modifier = Modifier,
     lazyListState: LazyListState = rememberLazyListState(),
     onDialogLongClick: ((D) -> Unit)? = null,
+    currentUserId: String? = null,
+    outgoingMessagePrefix: String = "You: ",
     style: DialogsListStyle = ChatKitDefaults.dialogsListStyle(),
     dateFormatter: ChatDateFormatter.Formatter = ChatDateFormatter.Formatter {
         ChatDateFormatter.formatDialogTimestamp(it)
     },
     contentPadding: PaddingValues = PaddingValues(0.dp),
     emptyContent: @Composable () -> Unit = { DefaultEmptyDialogsContent() },
+    subtitleBadgeContent: (@Composable (D) -> Unit)? = null,
     itemContent: (@Composable (dialog: D) -> Unit)? = null,
 ) {
     val animConfig = LocalChatKitAnimationConfig.current
+    val dialogSnapshot = dialogs.toList()
 
-    if (dialogs.isEmpty()) {
+    if (dialogSnapshot.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
@@ -72,16 +90,18 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
         return
     }
 
+    val dialogKeys = remember(dialogSnapshot) { buildUniqueDialogKeys(dialogSnapshot) }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         state = lazyListState,
         contentPadding = contentPadding,
     ) {
-        items(
-            items = dialogs,
-            key = { it.id },
-            contentType = { "dialog_item" },
-        ) { dialog ->
+        itemsIndexed(
+            items = dialogSnapshot,
+            key = { index, _ -> dialogKeys[index] },
+            contentType = { _, _ -> "dialog_item" },
+        ) { _, dialog ->
             Column(
                 modifier = if (animConfig.shouldAnimateItemPlacement) {
                     Modifier.animateItem()
@@ -94,8 +114,11 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
                 } else {
                     DefaultDialogRow(
                         dialog = dialog,
+                        currentUserId = currentUserId,
+                        outgoingMessagePrefix = outgoingMessagePrefix,
                         style = style,
                         dateFormatter = dateFormatter,
+                        subtitleBadgeContent = subtitleBadgeContent,
                         onClick = { onDialogClick(dialog) },
                         onLongClick = onDialogLongClick?.let { callback -> { callback(dialog) } },
                     )
@@ -122,12 +145,15 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
     onDialogClick: (D) -> Unit,
     modifier: Modifier = Modifier,
     onDialogLongClick: ((D) -> Unit)? = null,
+    currentUserId: String? = null,
+    outgoingMessagePrefix: String = "You: ",
     style: DialogsListStyle = ChatKitDefaults.dialogsListStyle(),
     dateFormatter: ChatDateFormatter.Formatter = ChatDateFormatter.Formatter {
         ChatDateFormatter.formatDialogTimestamp(it)
     },
     contentPadding: PaddingValues = PaddingValues(0.dp),
     emptyContent: @Composable () -> Unit = { DefaultEmptyDialogsContent() },
+    subtitleBadgeContent: (@Composable (D) -> Unit)? = null,
     itemContent: (@Composable (dialog: D) -> Unit)? = null,
 ) {
     DialogsList(
@@ -136,10 +162,13 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
         modifier = modifier,
         lazyListState = state.lazyListState,
         onDialogLongClick = onDialogLongClick,
+        currentUserId = currentUserId,
+        outgoingMessagePrefix = outgoingMessagePrefix,
         style = style,
         dateFormatter = dateFormatter,
         contentPadding = contentPadding,
         emptyContent = emptyContent,
+        subtitleBadgeContent = subtitleBadgeContent,
         itemContent = itemContent,
     )
 }
@@ -148,8 +177,11 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
 @Composable
 private fun <M : IMessage, D : IDialog<M>> DefaultDialogRow(
     dialog: D,
+    currentUserId: String?,
+    outgoingMessagePrefix: String,
     style: DialogsListStyle,
     dateFormatter: ChatDateFormatter.Formatter,
+    subtitleBadgeContent: (@Composable (D) -> Unit)?,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)?,
 ) {
@@ -217,7 +249,12 @@ private fun <M : IMessage, D : IDialog<M>> DefaultDialogRow(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = formatLastMessagePreview(dialog, isGroup),
+                    text = formatLastMessagePreview(
+                        dialog = dialog,
+                        isGroup = isGroup,
+                        currentUserId = currentUserId,
+                        outgoingMessagePrefix = outgoingMessagePrefix,
+                    ),
                     style = if (hasUnread) {
                         style.lastMessageTextStyle.copy(fontWeight = FontWeight.Medium)
                     } else {
@@ -228,6 +265,11 @@ private fun <M : IMessage, D : IDialog<M>> DefaultDialogRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+
+                if (subtitleBadgeContent != null) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    subtitleBadgeContent(dialog)
+                }
 
                 if (hasUnread) {
                     Spacer(modifier = Modifier.width(8.dp))
@@ -241,9 +283,11 @@ private fun <M : IMessage, D : IDialog<M>> DefaultDialogRow(
     }
 }
 
-private fun <M : IMessage> formatLastMessagePreview(
+internal fun <M : IMessage> formatLastMessagePreview(
     dialog: IDialog<M>,
     isGroup: Boolean,
+    currentUserId: String? = null,
+    outgoingMessagePrefix: String = "You: ",
 ): String {
     val lastMessage = dialog.lastMessage ?: return "No messages yet"
     val body = when {
@@ -258,7 +302,11 @@ private fun <M : IMessage> formatLastMessagePreview(
         lastMessage is MessageContentType.Document -> "File: ${lastMessage.fileName}"
         else -> "Attachment"
     }
-    return if (isGroup) "${lastMessage.user.name}: $body" else body
+    return when {
+        currentUserId != null && lastMessage.user.id == currentUserId -> "$outgoingMessagePrefix$body"
+        isGroup -> "${lastMessage.user.name}: $body"
+        else -> body
+    }
 }
 
 @Composable

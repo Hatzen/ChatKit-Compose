@@ -36,16 +36,14 @@ sealed interface TimelineItem {
     data class DateHeader(
         val id: String,
         val date: Date,
-    ) : TimelineItem {
-        override val key: String = "date_header_$id"
-    }
+        override val key: String = "date_header_$id",
+    ) : TimelineItem
 
     data class SystemItem<out M : IMessage>(
         val message: M,
         val event: MessageContentType.SystemEvent,
-    ) : TimelineItem {
-        override val key: String = "system_${message.id}"
-    }
+        override val key: String = "system_${message.id}",
+    ) : TimelineItem
 
     data class MessageItem<out M : IMessage>(
         val message: M,
@@ -53,9 +51,8 @@ sealed interface TimelineItem {
         val groupPosition: MessageGroupPosition,
         val showAvatar: Boolean,
         val showAuthorName: Boolean,
-    ) : TimelineItem {
-        override val key: String = "message_${message.id}"
-    }
+        override val key: String = "message_${message.id}",
+    ) : TimelineItem
 }
 
 /**
@@ -74,6 +71,12 @@ fun <M : IMessage> buildTimelineItems(
 
     val newestFirst = messages.sortedByDescending { it.createdAt.time }
     val result = ArrayList<TimelineItem>(newestFirst.size + 4)
+    val seenKeys = HashMap<String, Int>(newestFirst.size + 4)
+    fun uniqueKey(baseKey: String): String {
+        val count = seenKeys[baseKey] ?: 0
+        seenKeys[baseKey] = count + 1
+        return if (count == 0) baseKey else "$baseKey#$count"
+    }
 
     for (index in newestFirst.indices) {
         val current = newestFirst[index]
@@ -81,7 +84,13 @@ fun <M : IMessage> buildTimelineItems(
         val olderAbove = newestFirst.getOrNull(index + 1)
 
         if (current is MessageContentType.SystemEvent) {
-            result.add(TimelineItem.SystemItem(message = current, event = current))
+            result.add(
+                TimelineItem.SystemItem(
+                    message = current,
+                    event = current,
+                    key = uniqueKey("system_${current.id}"),
+                ),
+            )
         } else {
             val sameAsAbove = olderAbove != null &&
                 olderAbove !is MessageContentType.SystemEvent &&
@@ -120,16 +129,19 @@ fun <M : IMessage> buildTimelineItems(
                     groupPosition = groupPosition,
                     showAvatar = showAvatar,
                     showAuthorName = showAuthorName,
+                    key = uniqueKey("message_${current.id}"),
                 ),
             )
         }
 
         val isDayBoundary = olderAbove == null || !ChatDateFormatter.isSameDay(current.createdAt, olderAbove.createdAt)
         if (isDayBoundary) {
+            val dayId = ChatDateFormatter.dayKey(current.createdAt)
             result.add(
                 TimelineItem.DateHeader(
-                    id = ChatDateFormatter.dayKey(current.createdAt),
+                    id = dayId,
                     date = current.createdAt,
+                    key = uniqueKey("date_header_$dayId"),
                 ),
             )
         }
@@ -182,6 +194,10 @@ class MessagesListState<M : IMessage>(
 
     /** Whether at least one message is currently selected. */
     val isSelectionMode: Boolean
+        get() = selectedIds.isNotEmpty()
+
+    /** Alias for [isSelectionMode]: whether at least one message is currently selected. */
+    val hasSelection: Boolean
         get() = selectedIds.isNotEmpty()
 
     /**
