@@ -52,12 +52,15 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
     modifier: Modifier = Modifier,
     lazyListState: LazyListState = rememberLazyListState(),
     onDialogLongClick: ((D) -> Unit)? = null,
+    currentUserId: String? = null,
+    outgoingMessagePrefix: String = "You: ",
     style: DialogsListStyle = ChatKitDefaults.dialogsListStyle(),
     dateFormatter: ChatDateFormatter.Formatter = ChatDateFormatter.Formatter {
         ChatDateFormatter.formatDialogTimestamp(it)
     },
     contentPadding: PaddingValues = PaddingValues(0.dp),
     emptyContent: @Composable () -> Unit = { DefaultEmptyDialogsContent() },
+    subtitleBadgeContent: (@Composable (D) -> Unit)? = null,
     itemContent: (@Composable (dialog: D) -> Unit)? = null,
 ) {
     val animConfig = LocalChatKitAnimationConfig.current
@@ -94,8 +97,11 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
                 } else {
                     DefaultDialogRow(
                         dialog = dialog,
+                        currentUserId = currentUserId,
+                        outgoingMessagePrefix = outgoingMessagePrefix,
                         style = style,
                         dateFormatter = dateFormatter,
+                        subtitleBadgeContent = subtitleBadgeContent,
                         onClick = { onDialogClick(dialog) },
                         onLongClick = onDialogLongClick?.let { callback -> { callback(dialog) } },
                     )
@@ -122,12 +128,15 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
     onDialogClick: (D) -> Unit,
     modifier: Modifier = Modifier,
     onDialogLongClick: ((D) -> Unit)? = null,
+    currentUserId: String? = null,
+    outgoingMessagePrefix: String = "You: ",
     style: DialogsListStyle = ChatKitDefaults.dialogsListStyle(),
     dateFormatter: ChatDateFormatter.Formatter = ChatDateFormatter.Formatter {
         ChatDateFormatter.formatDialogTimestamp(it)
     },
     contentPadding: PaddingValues = PaddingValues(0.dp),
     emptyContent: @Composable () -> Unit = { DefaultEmptyDialogsContent() },
+    subtitleBadgeContent: (@Composable (D) -> Unit)? = null,
     itemContent: (@Composable (dialog: D) -> Unit)? = null,
 ) {
     DialogsList(
@@ -136,10 +145,13 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
         modifier = modifier,
         lazyListState = state.lazyListState,
         onDialogLongClick = onDialogLongClick,
+        currentUserId = currentUserId,
+        outgoingMessagePrefix = outgoingMessagePrefix,
         style = style,
         dateFormatter = dateFormatter,
         contentPadding = contentPadding,
         emptyContent = emptyContent,
+        subtitleBadgeContent = subtitleBadgeContent,
         itemContent = itemContent,
     )
 }
@@ -148,8 +160,11 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
 @Composable
 private fun <M : IMessage, D : IDialog<M>> DefaultDialogRow(
     dialog: D,
+    currentUserId: String?,
+    outgoingMessagePrefix: String,
     style: DialogsListStyle,
     dateFormatter: ChatDateFormatter.Formatter,
+    subtitleBadgeContent: (@Composable (D) -> Unit)?,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)?,
 ) {
@@ -217,7 +232,12 @@ private fun <M : IMessage, D : IDialog<M>> DefaultDialogRow(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    text = formatLastMessagePreview(dialog, isGroup),
+                    text = formatLastMessagePreview(
+                        dialog = dialog,
+                        isGroup = isGroup,
+                        currentUserId = currentUserId,
+                        outgoingMessagePrefix = outgoingMessagePrefix,
+                    ),
                     style = if (hasUnread) {
                         style.lastMessageTextStyle.copy(fontWeight = FontWeight.Medium)
                     } else {
@@ -228,6 +248,11 @@ private fun <M : IMessage, D : IDialog<M>> DefaultDialogRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+
+                if (subtitleBadgeContent != null) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    subtitleBadgeContent(dialog)
+                }
 
                 if (hasUnread) {
                     Spacer(modifier = Modifier.width(8.dp))
@@ -241,9 +266,11 @@ private fun <M : IMessage, D : IDialog<M>> DefaultDialogRow(
     }
 }
 
-private fun <M : IMessage> formatLastMessagePreview(
+internal fun <M : IMessage> formatLastMessagePreview(
     dialog: IDialog<M>,
     isGroup: Boolean,
+    currentUserId: String? = null,
+    outgoingMessagePrefix: String = "You: ",
 ): String {
     val lastMessage = dialog.lastMessage ?: return "No messages yet"
     val body = when {
@@ -258,7 +285,11 @@ private fun <M : IMessage> formatLastMessagePreview(
         lastMessage is MessageContentType.Document -> "File: ${lastMessage.fileName}"
         else -> "Attachment"
     }
-    return if (isGroup) "${lastMessage.user.name}: $body" else body
+    return when {
+        currentUserId != null && lastMessage.user.id == currentUserId -> "$outgoingMessagePrefix$body"
+        isGroup -> "${lastMessage.user.name}: $body"
+        else -> body
+    }
 }
 
 @Composable

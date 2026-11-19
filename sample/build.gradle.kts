@@ -5,16 +5,12 @@ plugins {
 
 android {
     namespace = "de.hartz.software.chatkitcompose.sample"
-    compileSdk {
-        version = release(37) {
-            minorApiLevel = 1
-        }
-    }
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "de.hartz.software.chatkitcompose.sample"
-        minSdk = 24
-        targetSdk = 37
+        minSdk = 21
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
 

@@ -184,6 +184,10 @@ class MessagesListState<M : IMessage>(
     val isSelectionMode: Boolean
         get() = selectedIds.isNotEmpty()
 
+    /** Alias for [isSelectionMode]: whether at least one message is currently selected. */
+    val hasSelection: Boolean
+        get() = selectedIds.isNotEmpty()
+
     /**
      * Inserts a newly sent or received [message] at the newest end of the chat timeline,
      * mirroring `MessagesListAdapter.addToStart(message, scroll)`.

@@ -1,6 +1,7 @@
 package de.hartz.software.chatkitcompose
 
 import de.hartz.software.chatkitcompose.dialogs.DialogsListState
+import de.hartz.software.chatkitcompose.dialogs.formatLastMessagePreview
 import de.hartz.software.chatkitcompose.messages.MessagesListState
 import de.hartz.software.chatkitcompose.models.ChatDialog
 import de.hartz.software.chatkitcompose.models.ChatMessage
@@ -38,14 +39,17 @@ class MigrationModelsTest {
         assertEquals(MessageStatus.READ, state.messages.first().status)
 
         // Selection lifecycle
+        assertFalse(state.hasSelection)
         state.toggleSelection("1")
         state.toggleSelection("2")
         assertEquals(2, state.selectedCount)
         assertTrue(state.isSelectionMode)
+        assertTrue(state.hasSelection)
 
         assertEquals(2, state.deleteSelected())
         assertEquals(0, state.selectedCount)
         assertFalse(state.isSelectionMode)
+        assertFalse(state.hasSelection)
         assertEquals(listOf("3"), state.messages.map { it.id })
 
         assertTrue(state.deleteById("3"))
@@ -74,6 +78,19 @@ class MigrationModelsTest {
 
         assertTrue(state.deleteById("d2"))
         assertEquals(listOf("d1"), state.dialogs.map { it.id })
+    }
+
+    @Test
+    fun `formatLastMessagePreview prefixes outgoing messages when currentUserId is provided`() {
+        val myMsg = ChatMessage("m1", "Secret note", me, Date(1_000L))
+        val bobMsg = ChatMessage("m2", "Reply", bob, Date(2_000L))
+
+        val myDialog = ChatDialog(id = "d1", dialogName = "Bob", users = listOf(me, bob), lastMessage = myMsg)
+        val bobDialog = ChatDialog(id = "d2", dialogName = "Bob", users = listOf(me, bob), lastMessage = bobMsg)
+
+        assertEquals("You: Secret note", formatLastMessagePreview(myDialog, isGroup = false, currentUserId = me.id))
+        assertEquals("Reply", formatLastMessagePreview(bobDialog, isGroup = false, currentUserId = me.id))
+        assertEquals("Bob: Reply", formatLastMessagePreview(bobDialog, isGroup = true, currentUserId = me.id))
     }
 }
 
