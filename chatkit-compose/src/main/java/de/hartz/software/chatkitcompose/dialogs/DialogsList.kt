@@ -17,7 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.HorizontalDivider
@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -38,6 +39,19 @@ import de.hartz.software.chatkitcompose.theme.ChatKitDefaults
 import de.hartz.software.chatkitcompose.theme.DialogsListStyle
 import de.hartz.software.chatkitcompose.theme.LocalChatKitAnimationConfig
 import de.hartz.software.chatkitcompose.utils.ChatDateFormatter
+
+/**
+ * Disambiguates duplicate `IDialog.id` values (for example across distinct domain subclasses
+ * sharing a numeric persistence ID) so `LazyColumn` item keys remain strictly unique.
+ */
+internal fun buildUniqueDialogKeys(dialogs: List<IDialog<*>>): List<String> {
+    val seen = HashMap<String, Int>(dialogs.size)
+    return dialogs.map { dialog ->
+        val count = seen[dialog.id] ?: 0
+        seen[dialog.id] = count + 1
+        if (count == 0) dialog.id else "${dialog.id}#$count"
+    }
+}
 
 /**
  * Stateless Jetpack Compose replacement for `com.stfalcon.chatkit.dialogs.DialogsList`.
@@ -64,8 +78,9 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
     itemContent: (@Composable (dialog: D) -> Unit)? = null,
 ) {
     val animConfig = LocalChatKitAnimationConfig.current
+    val dialogSnapshot = dialogs.toList()
 
-    if (dialogs.isEmpty()) {
+    if (dialogSnapshot.isEmpty()) {
         Box(
             modifier = modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
@@ -75,16 +90,18 @@ fun <M : IMessage, D : IDialog<M>> DialogsList(
         return
     }
 
+    val dialogKeys = remember(dialogSnapshot) { buildUniqueDialogKeys(dialogSnapshot) }
+
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         state = lazyListState,
         contentPadding = contentPadding,
     ) {
-        items(
-            items = dialogs,
-            key = { it.id },
-            contentType = { "dialog_item" },
-        ) { dialog ->
+        itemsIndexed(
+            items = dialogSnapshot,
+            key = { index, _ -> dialogKeys[index] },
+            contentType = { _, _ -> "dialog_item" },
+        ) { _, dialog ->
             Column(
                 modifier = if (animConfig.shouldAnimateItemPlacement) {
                     Modifier.animateItem()

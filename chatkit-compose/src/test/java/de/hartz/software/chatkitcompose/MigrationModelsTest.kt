@@ -1,8 +1,10 @@
 package de.hartz.software.chatkitcompose
 
 import de.hartz.software.chatkitcompose.dialogs.DialogsListState
+import de.hartz.software.chatkitcompose.dialogs.buildUniqueDialogKeys
 import de.hartz.software.chatkitcompose.dialogs.formatLastMessagePreview
 import de.hartz.software.chatkitcompose.messages.MessagesListState
+import de.hartz.software.chatkitcompose.messages.buildTimelineItems
 import de.hartz.software.chatkitcompose.models.ChatDialog
 import de.hartz.software.chatkitcompose.models.ChatMessage
 import de.hartz.software.chatkitcompose.models.ChatUser
@@ -91,6 +93,30 @@ class MigrationModelsTest {
         assertEquals("You: Secret note", formatLastMessagePreview(myDialog, isGroup = false, currentUserId = me.id))
         assertEquals("Reply", formatLastMessagePreview(bobDialog, isGroup = false, currentUserId = me.id))
         assertEquals("Bob: Reply", formatLastMessagePreview(bobDialog, isGroup = true, currentUserId = me.id))
+    }
+
+    @Test
+    fun `buildUniqueDialogKeys disambiguates duplicate dialog ids`() {
+        val first = ChatDialog<ChatMessage>(id = "2", dialogName = "Alice", users = listOf(me, bob))
+        val second = ChatDialog<ChatMessage>(id = "2", dialogName = "Team", users = listOf(me, bob))
+        val third = ChatDialog<ChatMessage>(id = "3", dialogName = "Charlie", users = listOf(me, bob))
+        val fourth = ChatDialog<ChatMessage>(id = "2", dialogName = "Squad", users = listOf(me, bob))
+
+        val keys = buildUniqueDialogKeys(listOf(first, second, third, fourth))
+        assertEquals(listOf("2", "2#1", "3", "2#2"), keys)
+        assertEquals(4, keys.toSet().size)
+    }
+
+    @Test
+    fun `buildTimelineItems disambiguates duplicate message ids`() {
+        val m1 = ChatMessage("0", "First unsaved", me, Date(1_000L))
+        val m2 = ChatMessage("0", "Second unsaved", bob, Date(2_000L))
+
+        val timeline = buildTimelineItems(listOf(m1, m2), senderId = me.id)
+        val keys = timeline.map { it.key }
+        assertEquals(timeline.size, keys.toSet().size)
+        assertTrue(keys.contains("message_0"))
+        assertTrue(keys.contains("message_0#1"))
     }
 }
 
