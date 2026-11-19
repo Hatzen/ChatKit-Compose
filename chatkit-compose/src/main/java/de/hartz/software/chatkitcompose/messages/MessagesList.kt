@@ -52,6 +52,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -635,7 +636,16 @@ private fun <M : IMessage> MessageBubble(
                         status = message.status,
                         defaultTint = timeColor,
                         readTint = style.statusReadTint,
-                        errorTint = style.statusErrorTint,
+                        warningTint = resolveBubbleStatusTint(
+                            baseTint = style.statusWarningTint,
+                            bubbleColor = containerColor,
+                            darkBubbleFallback = Color(0xFFFFD54F),
+                        ),
+                        errorTint = resolveBubbleStatusTint(
+                            baseTint = style.statusErrorTint,
+                            bubbleColor = containerColor,
+                            darkBubbleFallback = Color(0xFFFF8A80),
+                        ),
                     )
                 }
             }
@@ -799,11 +809,24 @@ private fun ReplyPreviewBlock(
     }
 }
 
+internal fun resolveBubbleStatusTint(
+    baseTint: Color,
+    bubbleColor: Color,
+    darkBubbleFallback: Color,
+): Color {
+    return if (bubbleColor.luminance() < 0.3f && baseTint.luminance() < 0.35f) {
+        darkBubbleFallback
+    } else {
+        baseTint
+    }
+}
+
 @Composable
 private fun MessageStatusIcon(
     status: MessageStatus,
     defaultTint: Color,
     readTint: Color,
+    warningTint: Color,
     errorTint: Color,
 ) {
     val rotateSending = status == MessageStatus.SENDING &&
@@ -831,7 +854,7 @@ private fun MessageStatusIcon(
         MessageStatus.DELIVERED -> Triple(ChatKitIcons.DoneAll, defaultTint, "Delivered")
         MessageStatus.READ -> Triple(ChatKitIcons.DoneAll, readTint, "Read")
         MessageStatus.UNCONFIRMED -> Triple(ChatKitIcons.HelpOutline, defaultTint, "Awaiting confirmation")
-        MessageStatus.WARNING -> Triple(ChatKitIcons.Warning, errorTint, "Security warning")
+        MessageStatus.WARNING -> Triple(ChatKitIcons.Warning, warningTint, "Security warning")
         MessageStatus.FAILED -> Triple(ChatKitIcons.ErrorOutline, errorTint, "Failed to send")
     }
     Icon(

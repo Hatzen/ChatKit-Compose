@@ -1,10 +1,12 @@
 package de.hartz.software.chatkitcompose
 
+import androidx.compose.ui.graphics.Color
 import de.hartz.software.chatkitcompose.dialogs.DialogsListState
 import de.hartz.software.chatkitcompose.dialogs.buildUniqueDialogKeys
 import de.hartz.software.chatkitcompose.dialogs.formatLastMessagePreview
 import de.hartz.software.chatkitcompose.messages.MessagesListState
 import de.hartz.software.chatkitcompose.messages.buildTimelineItems
+import de.hartz.software.chatkitcompose.messages.resolveBubbleStatusTint
 import de.hartz.software.chatkitcompose.models.ChatDialog
 import de.hartz.software.chatkitcompose.models.ChatMessage
 import de.hartz.software.chatkitcompose.models.ChatUser
@@ -117,6 +119,21 @@ class MigrationModelsTest {
         assertEquals(timeline.size, keys.toSet().size)
         assertTrue(keys.contains("message_0"))
         assertTrue(keys.contains("message_0#1"))
+    }
+
+    @Test
+    fun `resolveBubbleStatusTint uses high contrast fallback on dark bubbles`() {
+        val darkTealBubble = Color(0xFF00695C)
+        val lightGrayBubble = Color(0xFFECEFF1)
+        val darkAmber = Color(0xFFE65100)
+        val darkRed = Color(0xFFCC1111)
+        val amberFallback = Color(0xFFFFD54F)
+        val coralFallback = Color(0xFFFF8A80)
+
+        assertEquals(amberFallback, resolveBubbleStatusTint(darkAmber, darkTealBubble, amberFallback))
+        assertEquals(coralFallback, resolveBubbleStatusTint(darkRed, darkTealBubble, coralFallback))
+        assertEquals(darkAmber, resolveBubbleStatusTint(darkAmber, lightGrayBubble, amberFallback))
+        assertEquals(darkRed, resolveBubbleStatusTint(darkRed, lightGrayBubble, coralFallback))
     }
 }
 
